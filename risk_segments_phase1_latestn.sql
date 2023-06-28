@@ -2,8 +2,9 @@
 with weightage_tab as 
 (
 select
-    distinct context as context_w, priority, cast(ctxt_wtge as real) as ctxt_wtge, try(cast(fc_wtge as int)) as fc_wtge, 
-    try(cast(mf_wtge as int)) as mf_wtge, try(cast(esc_wtge as int)) as esc_wtge, try(cast(othr_wtge as int)) as othr_wtge
+    distinct context as context_w, priority, try(cast(bike_ctxt_wtge as real)) as bike_ctxt_wtge, try(cast(auto_ctxt_wtge as real)) as auto_ctxt_wtge,
+    try(cast(fc_wtge as int)) as fc_wtge, try(cast(mf_wtge as int)) as mf_wtge, try(cast(esc_wtge as int)) as esc_wtge,
+    try(cast(female_wtge as int)) as female_wtge, try(cast(male_blank_wtge as int)) as male_blank_wtge 
 from    
     experiments.hsc_risk_identifiers_new
 where
@@ -20,53 +21,27 @@ where
     channel = 'feedback_chip'
 )
 
--- ,ct_speed as 
--- (
--- select
---     order_id,
---     max(cast(maxSpeed as double)) as maxSpeed
--- from 
---     (
---     select 
---         yyyymmdd, eventProps_orderId as order_id, eventProps_data,
---         json_extract_scalar(eventProps_data,'$.maxSpeed') as maxSpeed
---     from 
---         raw.clevertap_captain_captainoverspeed
---     where 
---         yyyymmdd >= date_format(date('2022-12-19') - interval '1' day,'%Y%m%d')
---         and yyyymmdd <= date_format(date('2023-06-18') + interval '1' day,'%Y%m%d')
---     )
--- group by 
---     1
--- )
-
 ,orders_raw as 
 (
 select
-    p_ords.*, 
-    -- maxSpeed, 
-    cast(dense_rank() over(order by week_fin) as double)/2 as week_wtge 
+    *, cast(dense_rank() over(order by week_fin) as double)/2 as week_wtge 
 from 
     (
     select 
         date_format(date_trunc('week',date_parse(yyyymmdd,'%Y%m%d')), '%Y-%m-%d') as week_fin,
         yyyymmdd, service_obj_service_name as service, cast(json_parse(customer_feedback_rate_service) as array<varchar>) as feedback_chips,
-        service_obj_city_display_name as city, captain_id, order_id, customer_feedback_rate_service as fb_tag, unique_id, customer_id, 
-        (case when customer_feedback_rating > 0 then customer_feedback_rating else null end) as customer_rating,
-        (case when customer_obj_gender = '1' then (select distinct try(cast(gender_wtge as int)) 
-        from experiments.hsc_risk_identifiers_new where feedback_identfier = 'female') else 3 end) as gender_wtge
+        service_obj_city_display_name as city, captain_id, order_id, unique_id, 
+        (case when customer_obj_gender = '1' then 'female' else 'male_blank' end) as customer_gender
     from 
         orders.order_logs_snapshot
     where 
         yyyymmdd >= date_format(date('2022-12-19'),'%Y%m%d')
         and yyyymmdd <= date_format(date('2023-06-18'),'%Y%m%d')
-        and service_obj_service_name = 'Link'
-        and service_obj_city_display_name = 'Bangalore'
+        and ((service_obj_service_name = 'Link' and service_obj_city_display_name IN ('Bangalore','Hyderabad','Chennai','Delhi','Jaipur','Kolkata')) 
+        or (service_obj_service_name = 'Auto' and service_obj_city_display_name IN ('Bangalore','Hyderabad','Chennai','Delhi','Jaipur','Mumbai')))
         and order_status = 'dropped'
         and (spd_fraud_flag = false or spd_fraud_flag is null)
-    ) p_ords
-    --  left join ct_speed
-    -- on p_ords.order_id = ct_speed.order_id
+    )
 )
 
 ,fc_wtge_tab as 
@@ -100,8 +75,9 @@ from
     from 
         (
         select
-            week_fin, service, feedback_chips, city, captain_id, order_id, fb_tag, unique_id, 
-            customer_id, context, priority, ctxt_wtge, fc_wtge, gender_wtge, week_wtge
+            week_fin, service, feedback_chips, city, captain_id, order_id, unique_id, week_wtge,
+            context, priority, (case when service = 'Link' then bike_ctxt_wtge else auto_ctxt_wtge end) as ctxt_wtge, 
+            fc_wtge, customer_gender, (case when customer_gender = 'female' then female_wtge else male_blank_wtge end) as gender_wtge
         from
             (
             select
@@ -142,7 +118,8 @@ select
 from 
     (
     select
-        week_fin, service, city, captain_id, esc_context_new, ctxt_wtge, esc_wtge, gender_wtge, week_wtge,
+        week_fin, service, city, captain_id, esc_context_new, (case when service = 'Link' then bike_ctxt_wtge else auto_ctxt_wtge end) as ctxt_wtge,
+        esc_wtge, (case when customer_gender = 'female' then female_wtge else male_blank_wtge end) as gender_wtge, week_wtge,
         
         count(rd_order_id) as coverage_count,
         count(case when priority is not null then rd_order_id end) as negative_count, 
@@ -217,7 +194,8 @@ select
 from 
     (
     select
-        week_fin, service, city, captain_id, data_context_new, ctxt_wtge, mf_wtge, gender_wtge, week_wtge,
+        week_fin, service, city, captain_id, data_context_new, (case when service = 'Link' then bike_ctxt_wtge else auto_ctxt_wtge end) as ctxt_wtge, 
+        mf_wtge, (case when customer_gender = 'female' then female_wtge else male_blank_wtge end) as gender_wtge, week_wtge,
         
         count(data_orderid) as coverage_count,
         count(case when priority is not null then data_orderid end) as negative_count, 
@@ -492,4 +470,3 @@ from
             
 
 )
-
