@@ -28,6 +28,7 @@ from
 where 
     yyyymmdd >= date_format(current_date - interval '29' day,'%Y%m%d')
     and yyyymmdd <= date_format(current_date,'%Y%m%d')
+    and data_audience = 'customer'
     and data_screen != 'ratings'
     and (lower(data_text) like '%offer a helmet%' or lower(data_text) like '%receive a helmet%'
     or lower(data_text) like '%given you a helmet%')
