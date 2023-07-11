@@ -219,6 +219,7 @@ from
                 and yyyymmdd <= date_format(date('2023-06-18') + interval '1' day,'%Y%m%d')
                 and data_orderid IN (select distinct order_id from orders_raw)
                 and data_screen != 'ratings'
+                and data_audience = 'customer'
             ) pr_qlogs11
             
             inner join 
@@ -240,6 +241,7 @@ from
             where 
                 yyyymmdd >= date_format(date('2022-12-19') - interval '1' day,'%Y%m%d')
                 and yyyymmdd <= '20230214'
+                and audience = 'customer'
                 and order_id IN (select distinct order_id from orders_raw)
                 and lower(cast(screen as varchar)) not like '%ratings%'
             )  pr_qlogs22
