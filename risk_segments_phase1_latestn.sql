@@ -1,4 +1,3 @@
-
 with weightage_tab as 
 (
 select
@@ -114,23 +113,42 @@ select
     
     sum(p2_negative_count) as p2_negative_count,
     
-    sum(coalesce(ctxt_wtge, 0) * coalesce(negative_count, 0) * coalesce(gender_wtge, 0) * coalesce(esc_wtge, 0) * coalesce(week_wtge, 0)) as ngtv_esc_wtge
+    sum(p0_escalations_count) as p0_escalations_count,
+    
+    sum(p1_escalations_count) as p1_escalations_count,
+    
+    sum(p2_escalations_count) as p2_escalations_count,
+    
+    sum(coalesce(ctxt_wtge, 0) * coalesce(negative_count, 0) * coalesce(gender_wtge, 0) * coalesce(esc_wtge, 0) * coalesce(week_wtge, 0) * priority_wtge) as ngtv_esc_wtge
 from 
     (
     select
         week_fin, service, city, captain_id, esc_context_new, (case when service = 'Link' then bike_ctxt_wtge else auto_ctxt_wtge end) as ctxt_wtge,
-        esc_wtge, (case when customer_gender = 'female' then female_wtge else male_blank_wtge end) as gender_wtge, week_wtge,
+        esc_wtge, (case when customer_gender = 'female' then female_wtge else male_blank_wtge end) as gender_wtge, week_wtge, priority_wtge,
         
         count(rd_order_id) as coverage_count,
         count(case when priority is not null then rd_order_id end) as negative_count, 
         
         count(case when priority = 'P0' then order_id end) as p0_negative_count, 
         count(case when priority = 'P1' then order_id end) as p1_negative_count, 
-        count(case when priority = 'P2' then order_id end) as p2_negative_count
+        count(case when priority = 'P2' then order_id end) as p2_negative_count,
+        
+        count(distinct case when custom_fields_cf_calling_priority = 'P0' then order_id end) as p0_escalations_count, 
+        count(distinct case when custom_fields_cf_calling_priority = 'P1' then order_id end) as p1_escalations_count, 
+        count(distinct case when custom_fields_cf_calling_priority = 'P2' then order_id end) as p2_escalations_count
     from 
         (
         select 
-            distinct custom_fields_cf_rd_order_id as rd_order_id, coalesce(esc_refrnc_ph1.context, esc_refrnc_ph22.context) as esc_context_new
+            distinct custom_fields_cf_rd_order_id as rd_order_id, custom_fields_cf_calling_priority,
+            
+            (case 
+                when custom_fields_cf_calling_priority = 'P0' then 6
+                when custom_fields_cf_calling_priority = 'P1' then 3
+            else 
+                1 
+            end) as priority_wtge,
+            
+            coalesce(esc_refrnc_ph1.context, esc_refrnc_ph22.context) as esc_context_new
         from 
             (
             select  
@@ -168,7 +186,7 @@ from
     where 
         esc_context_new is not null 
     group by 
-        1, 2, 3, 4, 5, 6, 7, 8, 9
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 10 
     )
 group by 
     1, 2, 3 
@@ -312,7 +330,11 @@ group by
         
         coalesce(fc_unsafe_bhv, 0) + coalesce(tcks_unsafe_bhv, 0) + coalesce(q_logs.unsafe_behave_count, 0) as unsafe_bhv_cnt, 
         
-        coalesce(fc_unsafe_rde, 0) + coalesce(tcks_unsafe_rde, 0) + coalesce(q_logs.unsafe_ride_count, 0) as unsafe_rde_cnt
+        coalesce(fc_unsafe_rde, 0) + coalesce(tcks_unsafe_rde, 0) + coalesce(q_logs.unsafe_ride_count, 0) as unsafe_rde_cnt, 
+        
+        coalesce(p0_escalations_count, 0) as p0_escalations_count, coalesce(p1_escalations_count, 0) as p1_escalations_count,
+        
+        coalesce(p2_escalations_count, 0) as p2_escalations_count
         
     from 
         (
@@ -331,7 +353,9 @@ group by
             
             fc_wtge_tab.unsafe_behave_count as fc_unsafe_bhv, fc_wtge_tab.unsafe_ride_count as fc_unsafe_rde, 
             
-            tckts_tab.unsafe_behave_count as tcks_unsafe_bhv, tckts_tab.unsafe_ride_count as tcks_unsafe_rde
+            tckts_tab.unsafe_behave_count as tcks_unsafe_bhv, tckts_tab.unsafe_ride_count as tcks_unsafe_rde, 
+            
+            tckts_tab.p0_escalations_count, tckts_tab.p1_escalations_count, tckts_tab.p2_escalations_count
             
         from 
             fc_wtge_tab full outer join tckts_tab 
@@ -389,7 +413,7 @@ select
         when total_weightage >= wt_pct_low then 'MR'
         when (coverage_count is null or coverage_count = 0) then 'NC'
     else 
-        '2. LR'
+        'LR'
     end) as safety_profile, 
     (case 
         when unsafe_bhv_cnt > 1 and unsafe_bhv_pctg >= 0.35 then 'Unsafe Behaviour'
@@ -442,7 +466,9 @@ from
         unsafe_rde_cnt,
         (case when negative_count >= 1 then cast(unsafe_rde_cnt as double)/negative_count end) as unsafe_rde_pctg,
         
-        (case when negative_count >= 1 then cast((coalesce(unsafe_bhv_cnt, 0) + coalesce(unsafe_rde_cnt, 0)) as double)/negative_count end) as unsafe_pctg
+        (case when negative_count >= 1 then cast((coalesce(unsafe_bhv_cnt, 0) + coalesce(unsafe_rde_cnt, 0)) as double)/negative_count end) as unsafe_pctg, 
+        
+        p0_escalations_count, p1_escalations_count, p2_escalations_count
         
         -- ,cast(overspd_ords as double)/net_orders as overspd_ords_pct
     from 
