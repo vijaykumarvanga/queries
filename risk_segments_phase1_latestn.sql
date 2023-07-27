@@ -447,7 +447,7 @@ from
 -- from 
 --     (
     select
-        date_format(date_trunc('week',date('2023-06-18')),'%Y-%m-%d') as date_week, 
+        date_format(date('2023-06-18'),'%Y-%m-%d') as as_of_date, 
         m_net_c.*, 
         coverage_count, negative_count, 
         p0_negative_count, 
