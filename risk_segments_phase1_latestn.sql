@@ -36,8 +36,8 @@ from
     where 
         yyyymmdd >= date_format(date('2023-01-23'),'%Y%m%d')
         and yyyymmdd <= date_format(date('2023-07-23'),'%Y%m%d')
-        and service_obj_service_name = 'Link' 
-        and service_obj_city_display_name = 'Bangalore'
+        and ((service_obj_service_name = 'Link' and service_obj_city_display_name IN ('Bangalore','Hyderabad','Chennai','Delhi','Jaipur','Kolkata')) 
+        or (service_obj_service_name = 'Auto' and service_obj_city_display_name IN ('Bangalore','Hyderabad','Chennai','Delhi','Jaipur','Mumbai')))
         and order_status = 'dropped'
         and (spd_fraud_flag = false or spd_fraud_flag is null)
     )
