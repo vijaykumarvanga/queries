@@ -29,13 +29,13 @@ from
     select 
         date_format(date_trunc('week',date_parse(yyyymmdd,'%Y%m%d')), '%Y-%m-%d') as week_fin,
         yyyymmdd, service_obj_service_name as service, cast(json_parse(customer_feedback_rate_service) as array<varchar>) as feedback_chips,
-        service_obj_city_display_name as city, captain_id, order_id, unique_id, 
+        service_obj_city_display_name as city, captain_id, order_id, unique_id, service_detail_id,
         (case when customer_obj_gender = '1' then 'female' else 'male_blank' end) as customer_gender
     from 
         orders.order_logs_snapshot
     where 
-        yyyymmdd >= date_format(date('2022-12-19'),'%Y%m%d')
-        and yyyymmdd <= date_format(date('2023-06-18'),'%Y%m%d')
+        yyyymmdd >= date_format(date('2023-01-23'),'%Y%m%d')
+        and yyyymmdd <= date_format(date('2023-07-23'),'%Y%m%d')
         and ((service_obj_service_name = 'Link' and service_obj_city_display_name IN ('Bangalore','Hyderabad','Chennai','Delhi','Jaipur','Kolkata')) 
         or (service_obj_service_name = 'Auto' and service_obj_city_display_name IN ('Bangalore','Hyderabad','Chennai','Delhi','Jaipur','Mumbai')))
         and order_status = 'dropped'
@@ -47,7 +47,6 @@ from
 (
 select
     service, city, captain_id, 
-    sum(coverage_count) as coverage_count,
     sum(negative_count) as negative_count, 
     
     sum(case when context = 'safe_behaviour_no' then p0_negative_count end) as unsafe_behave_count,
@@ -64,8 +63,7 @@ from
     (
     select
         week_fin, service, city, captain_id, context, ctxt_wtge, fc_wtge, gender_wtge, week_wtge,
-        count(order_id) as coverage_count,
-        count(case when priority is not null then order_id end) as negative_count, 
+        count(order_id) as negative_count,
         
         count(case when priority = 'P0' then order_id end) as p0_negative_count, 
         count(case when priority = 'P1' then order_id end) as p1_negative_count, 
@@ -97,11 +95,26 @@ group by
     1, 2, 3 
 )
 
+,freshdesk_tab as 
+(
+select  
+    distinct custom_fields_cf_rd_order_id as rd_order_id, custom_fields_cf_calling_priority, 
+    custom_fields_cf_reason, custom_fields_cf_sub_reason918254, custom_fields_cf_booking_id as booking_id
+from
+    freshdesk.tickets_snapshot
+where 
+    yyyymmdd >= date_format(date('2023-01-23') - interval '1' day,'%Y%m%d')       ---- start date (before 6 months)
+    and yyyymmdd <= date_format(date('2023-07-17'),'%Y%m%d')                      ---- Date is fixed, don't change this
+    and custom_fields_cf_ticketing_disposition = 'Customer Support'
+    and custom_fields_cf_sub_reason918254 is not null
+    and custom_fields_cf_reason IN (select distinct feedback_identfier from experiments.hsc_risk_identifiers_new where channel = 'escalation_ticket')
+    and tags not like '%customer_live_support%' 
+)
+
 ,tckts_tab as 
 (
 select
     service, city, captain_id, 
-    sum(coverage_count) as coverage_count, 
     sum(negative_count) as negative_count, 
     
     sum(case when esc_context_new = 'safe_behaviour_no' then p0_negative_count end) as unsafe_behave_count,
@@ -126,8 +139,7 @@ from
         week_fin, service, city, captain_id, esc_context_new, (case when service = 'Link' then bike_ctxt_wtge else auto_ctxt_wtge end) as ctxt_wtge,
         esc_wtge, (case when customer_gender = 'female' then female_wtge else male_blank_wtge end) as gender_wtge, week_wtge, priority_wtge,
         
-        count(rd_order_id) as coverage_count,
-        count(case when priority is not null then rd_order_id end) as negative_count, 
+        count(case when priority is not null then order_id end) as negative_count, 
         
         count(case when priority = 'P0' then order_id end) as p0_negative_count, 
         count(case when priority = 'P1' then order_id end) as p1_negative_count, 
@@ -139,30 +151,70 @@ from
     from 
         (
         select 
-            distinct custom_fields_cf_rd_order_id as rd_order_id, custom_fields_cf_calling_priority,
+            distinct tfrsh.order_id, tfrsh.custom_fields_cf_calling_priority,
             
             (case 
-                when custom_fields_cf_calling_priority = 'P0' then 6
-                when custom_fields_cf_calling_priority = 'P1' then 3
+                when tfrsh.custom_fields_cf_calling_priority = 'P0' then 6
+                when tfrsh.custom_fields_cf_calling_priority = 'P1' then 3
             else 
                 1 
-            end) as priority_wtge,
+            end) as priority_wtge, tfrsh.week_fin, tfrsh.service, tfrsh.city, tfrsh.captain_id, tfrsh.week_wtge, tfrsh.customer_gender,
             
             coalesce(esc_refrnc_ph1.context, esc_refrnc_ph22.context) as esc_context_new
         from 
             (
-            select  
-                *
-            from
-                freshdesk.tickets_snapshot
-            where 
-                yyyymmdd >= date_format(date('2022-12-19') - interval '1' day,'%Y%m%d')
-                and yyyymmdd <= date_format(date('2023-06-18') + interval '10' day,'%Y%m%d')
-                and custom_fields_cf_ticketing_disposition = 'Customer Support'
-                and custom_fields_cf_rd_order_id IN (select distinct unique_id from orders_raw) 
-                and custom_fields_cf_sub_reason918254 is not null
-                and custom_fields_cf_reason IN (select distinct feedback_identfier from experiments.hsc_risk_identifiers_new where channel = 'escalation_ticket')
-                and tags not like '%customer_live_support%' 
+            select
+                distinct order_id, custom_fields_cf_calling_priority, custom_fields_cf_reason,
+                custom_fields_cf_sub_reason918254, week_fin, service, city, captain_id, week_wtge, customer_gender
+            from 
+                (
+                (
+                select
+                    orders_raw.order_id, custom_fields_cf_calling_priority, custom_fields_cf_reason,
+                    custom_fields_cf_sub_reason918254, week_fin, service, city, captain_id, week_wtge, customer_gender
+                from 
+                    freshdesk_tab
+                    
+                    inner join orders_raw
+                    on freshdesk_tab.rd_order_id = orders_raw.unique_id
+                ) 
+                UNION
+                (
+                select
+                    orders_raw.order_id, custom_fields_cf_calling_priority, custom_fields_cf_reason,
+                    custom_fields_cf_sub_reason918254, week_fin, service, city, captain_id, week_wtge, customer_gender
+                from 
+                    freshdesk_tab
+                    
+                    inner join orders_raw
+                    on freshdesk_tab.booking_id = orders_raw.order_id
+                )
+                UNION
+                (
+                select
+                    orders_raw.order_id, custom_fields_cf_calling_priority, custom_fields_cf_reason,
+                    custom_fields_cf_sub_reason918254, week_fin, service, city, captain_id, week_wtge, customer_gender
+                from    
+                    (
+                    select
+                        booking_id as book_id, null as custom_fields_cf_calling_priority, 
+                        reason as custom_fields_cf_reason, sub_reason918254 as custom_fields_cf_sub_reason918254
+                    from 
+                        raw.kafka_domain_support_tickets_v2_immutable
+                    where 
+                        yyyymmdd >= date_format(date('2023-07-18'),'%Y%m%d')       ---- Date is fixed, don't change this
+                        and yyyymmdd <= date_format(date('2023-07-23') + interval '10' day,'%Y%m%d')                      ---- end date (after 6 months)
+                        and booking_id IN (select order_id from orders_raw) 
+                        and sub_reason918254 is not null
+                        and not contains(cast(tags as array<varchar>), 'customer_live_support')
+                        and reason IN (select distinct feedback_identfier from experiments.hsc_risk_identifiers_new where channel = 'escalation_ticket')
+                    ) new_esc_tab 
+                    
+                    inner join orders_raw
+                    on new_esc_tab.book_id = orders_raw.order_id
+                )
+                )
+            
             ) tfrsh 
             
             left join 
@@ -178,9 +230,6 @@ from
             
         ) tfd_tab 
         
-        inner join orders_raw
-        on tfd_tab.rd_order_id = orders_raw.unique_id
-        
         left join weightage_tab
         on tfd_tab.esc_context_new = weightage_tab.context_w
     where 
@@ -189,14 +238,13 @@ from
         1, 2, 3, 4, 5, 6, 7, 8, 9, 10 
     )
 group by 
-    1, 2, 3 
+    1, 2, 3
 )
 
 ,q_logs as 
 (
 select
     service, city, captain_id,
-    sum(coverage_count) as coverage_count, 
     sum(negative_count) as negative_count, 
     
     sum(case when data_context_new = 'safe_behaviour_no' then p0_negative_count end) as unsafe_behave_count,
@@ -214,8 +262,7 @@ from
     select
         week_fin, service, city, captain_id, data_context_new, (case when service = 'Link' then bike_ctxt_wtge else auto_ctxt_wtge end) as ctxt_wtge, 
         mf_wtge, (case when customer_gender = 'female' then female_wtge else male_blank_wtge end) as gender_wtge, week_wtge,
-        
-        count(data_orderid) as coverage_count,
+
         count(case when priority is not null then data_orderid end) as negative_count, 
         
         count(case when priority = 'P0' then order_id end) as p0_negative_count, 
@@ -234,10 +281,12 @@ from
                 raw.kafka_quality_logs_immutable
             where 
                 yyyymmdd >= '20230215'
-                and yyyymmdd <= date_format(date('2023-06-18') + interval '1' day,'%Y%m%d')
+                and yyyymmdd <= date_format(date('2023-07-23') + interval '1' day,'%Y%m%d')
                 and data_orderid IN (select distinct order_id from orders_raw)
-                and data_screen != 'ratings'
+                and data_screen NOT IN ('ratings','storeRatings')
                 and data_audience = 'customer'
+                and data_questionid != 'none'
+                and data_text != ''
             ) pr_qlogs11
             
             inner join 
@@ -257,7 +306,7 @@ from
             from 
                 raw.mongodb_rapidoqaulity_qualitylogs_immutable
             where 
-                yyyymmdd >= date_format(date('2022-12-19') - interval '1' day,'%Y%m%d')
+                yyyymmdd >= date_format(date('2023-01-23') - interval '1' day,'%Y%m%d')
                 and yyyymmdd <= '20230214'
                 and audience = 'customer'
                 and order_id IN (select distinct order_id from orders_raw)
@@ -272,7 +321,7 @@ from
         )
         ) q_l_tab1 
         
-        inner join  orders_raw
+        inner join orders_raw
         on q_l_tab1.data_orderid = orders_raw.order_id
         
         left join weightage_tab
@@ -286,119 +335,74 @@ group by
     1, 2, 3 
 )
 
--- ,wtge_rate_tab as 
--- (
--- select
---     service, city, captain_id,
---     sum(coalesce(rating_wtge, 0) + coalesce(week_wtge,0)) as rating_wtge
--- from    
---     orders_raw
--- where 
---     rating_wtge is not null
--- group by 
---     1, 2, 3
--- )
-
 ,fin_wtge_tab as 
 (
--- select
---     coalesce(n_tab_n.service, wtge_rate_tab.service) as service, 
---     coalesce(n_tab_n.city, wtge_rate_tab.city) as city,
---     coalesce(n_tab_n.captain_id, wtge_rate_tab.captain_id) as captain_id,
---     coverage_count, negative_count, esc_p0_negative_count, esc_p1_negative_count, esc_p2_negative_count,
---     p0_negative_count, p1_negative_count, p2_negative_count,
---     coalesce(total_weightage, 0) + coalesce(rating_wtge, 0) as total_weightage, 
---     unsafe_bhv_cnt, unsafe_rde_cnt
--- from 
---     (
+select
+    coalesce(fc_tckts.service, q_logs.service) as service, coalesce(fc_tckts.city, q_logs.city) as city,
+    
+    coalesce(fc_tckts.captain_id, q_logs.captain_id) as captain_id,
+    
+    coalesce(fc_negative_count, 0) + coalesce(tckts_negative_count, 0) + coalesce(q_logs.negative_count, 0) as negative_count, 
+    
+    coalesce(fc_p0, 0) + coalesce(tckts_p0, 0) + coalesce(q_logs.p0_negative_count, 0) as p0_negative_count,  coalesce(tckts_p0, 0) as esc_p0_negative_count,
+    
+    coalesce(fc_p1, 0) + coalesce(tckts_p1, 0) + coalesce(q_logs.p1_negative_count, 0) as p1_negative_count, coalesce(tckts_p1, 0) as esc_p1_negative_count,
+    
+    coalesce(fc_p2, 0) + coalesce(tckts_p2, 0) + coalesce(q_logs.p2_negative_count, 0) as p2_negative_count, coalesce(tckts_p2, 0) as esc_p2_negative_count,
+    
+    coalesce(ngtv_fc_wge, 0) + coalesce(ngtv_esc_wtge, 0) + coalesce(ngtv_mf_wtge, 0) as total_weightage, 
+    
+    coalesce(fc_unsafe_bhv, 0) + coalesce(tcks_unsafe_bhv, 0) + coalesce(q_logs.unsafe_behave_count, 0) as unsafe_bhv_cnt, 
+    
+    coalesce(fc_unsafe_rde, 0) + coalesce(tcks_unsafe_rde, 0) + coalesce(q_logs.unsafe_ride_count, 0) as unsafe_rde_cnt, 
+    
+    coalesce(p0_escalations_count, 0) as p0_escalations_count, coalesce(p1_escalations_count, 0) as p1_escalations_count,
+    
+    coalesce(p2_escalations_count, 0) as p2_escalations_count
+    
+from 
+    (
     select
-        coalesce(fc_tckts.service, q_logs.service) as service, coalesce(fc_tckts.city, q_logs.city) as city,
+        coalesce(fc_wtge_tab.service, tckts_tab.service) as service, coalesce(fc_wtge_tab.city, tckts_tab.city) as city,
+    
+        coalesce(fc_wtge_tab.captain_id, tckts_tab.captain_id) as captain_id, 
         
-        coalesce(fc_tckts.captain_id, q_logs.captain_id) as captain_id,
+        fc_wtge_tab.negative_count as fc_negative_count, ngtv_fc_wge, tckts_tab.negative_count as tckts_negative_count, ngtv_esc_wtge, 
         
-        coalesce(fc_coverage_count, 0) + coalesce(tckts_coverage_count, 0) + coalesce(q_logs.coverage_count, 0) as coverage_count, 
+        fc_wtge_tab.p0_negative_count as fc_p0, fc_wtge_tab.p1_negative_count as fc_p1, fc_wtge_tab.p2_negative_count as fc_p2, 
         
-        coalesce(fc_negative_count, 0) + coalesce(tckts_negative_count, 0) + coalesce(q_logs.negative_count, 0) as negative_count, 
+        tckts_tab.p0_negative_count as tckts_p0, tckts_tab.p1_negative_count as tckts_p1, tckts_tab.p2_negative_count as tckts_p2, 
         
-        coalesce(fc_p0, 0) + coalesce(tckts_p0, 0) + coalesce(q_logs.p0_negative_count, 0) as p0_negative_count,  coalesce(tckts_p0, 0) as esc_p0_negative_count,
+        fc_wtge_tab.unsafe_behave_count as fc_unsafe_bhv, fc_wtge_tab.unsafe_ride_count as fc_unsafe_rde, 
         
-        coalesce(fc_p1, 0) + coalesce(tckts_p1, 0) + coalesce(q_logs.p1_negative_count, 0) as p1_negative_count, coalesce(tckts_p1, 0) as esc_p1_negative_count,
+        tckts_tab.unsafe_behave_count as tcks_unsafe_bhv, tckts_tab.unsafe_ride_count as tcks_unsafe_rde, 
         
-        coalesce(fc_p2, 0) + coalesce(tckts_p2, 0) + coalesce(q_logs.p2_negative_count, 0) as p2_negative_count, coalesce(tckts_p2, 0) as esc_p2_negative_count,
-        
-        coalesce(ngtv_fc_wge, 0) + coalesce(ngtv_esc_wtge, 0) + coalesce(ngtv_mf_wtge, 0) as total_weightage, 
-        
-        coalesce(fc_unsafe_bhv, 0) + coalesce(tcks_unsafe_bhv, 0) + coalesce(q_logs.unsafe_behave_count, 0) as unsafe_bhv_cnt, 
-        
-        coalesce(fc_unsafe_rde, 0) + coalesce(tcks_unsafe_rde, 0) + coalesce(q_logs.unsafe_ride_count, 0) as unsafe_rde_cnt, 
-        
-        coalesce(p0_escalations_count, 0) as p0_escalations_count, coalesce(p1_escalations_count, 0) as p1_escalations_count,
-        
-        coalesce(p2_escalations_count, 0) as p2_escalations_count
+        tckts_tab.p0_escalations_count, tckts_tab.p1_escalations_count, tckts_tab.p2_escalations_count
         
     from 
-        (
-        select
-            coalesce(fc_wtge_tab.service, tckts_tab.service) as service, coalesce(fc_wtge_tab.city, tckts_tab.city) as city,
-        
-            coalesce(fc_wtge_tab.captain_id, tckts_tab.captain_id) as captain_id, 
-            
-            fc_wtge_tab.coverage_count as fc_coverage_count, fc_wtge_tab.negative_count as fc_negative_count, ngtv_fc_wge, 
-            
-            tckts_tab.coverage_count as tckts_coverage_count, tckts_tab.negative_count as tckts_negative_count, ngtv_esc_wtge, 
-            
-            fc_wtge_tab.p0_negative_count as fc_p0, fc_wtge_tab.p1_negative_count as fc_p1, fc_wtge_tab.p2_negative_count as fc_p2, 
-            
-            tckts_tab.p0_negative_count as tckts_p0, tckts_tab.p1_negative_count as tckts_p1, tckts_tab.p2_negative_count as tckts_p2, 
-            
-            fc_wtge_tab.unsafe_behave_count as fc_unsafe_bhv, fc_wtge_tab.unsafe_ride_count as fc_unsafe_rde, 
-            
-            tckts_tab.unsafe_behave_count as tcks_unsafe_bhv, tckts_tab.unsafe_ride_count as tcks_unsafe_rde, 
-            
-            tckts_tab.p0_escalations_count, tckts_tab.p1_escalations_count, tckts_tab.p2_escalations_count
-            
-        from 
-            fc_wtge_tab full outer join tckts_tab 
-        on 
-            fc_wtge_tab.service = tckts_tab.service
-            and fc_wtge_tab.city = tckts_tab.city
-            and fc_wtge_tab.captain_id = tckts_tab.captain_id
-        ) fc_tckts 
-        
-        full outer join q_logs
-        on  
-            fc_tckts.service = q_logs.service
-            and fc_tckts.city = q_logs.city
-            and fc_tckts.captain_id = q_logs.captain_id
-    -- ) n_tab_n full outer join wtge_rate_tab
-    -- on
-    --     n_tab_n.service = wtge_rate_tab.service
-    --     and n_tab_n.city = wtge_rate_tab.city
-    --     and n_tab_n.captain_id = wtge_rate_tab.captain_id
+        fc_wtge_tab full outer join tckts_tab 
+    on 
+        fc_wtge_tab.service = tckts_tab.service
+        and fc_wtge_tab.city = tckts_tab.city
+        and fc_wtge_tab.captain_id = tckts_tab.captain_id
+    ) fc_tckts 
+    
+    full outer join q_logs
+    on  
+        fc_tckts.service = q_logs.service
+        and fc_tckts.city = q_logs.city
+        and fc_tckts.captain_id = q_logs.captain_id
 )
 
 ,thshlds_wt as 
 (
 select
     fin_wtge_tab.service, city,
-    approx_percentile(total_weightage, coalesce(low_pctl, 0.50)) as wt_pct_low, 
-    approx_percentile(total_weightage, coalesce(mid_pctl, 0.80)) as wt_pct_mid, 
-    approx_percentile(total_weightage, coalesce(top_pctl, 0.95)) as wt_pct_top 
+    approx_percentile(total_weightage, 0.50) as wt_pct_low, 
+    approx_percentile(total_weightage, 0.80) as wt_pct_mid, 
+    approx_percentile(total_weightage, 0.95) as wt_pct_top 
 from 
     fin_wtge_tab 
-    
-    left join 
-    (
-    select 
-        city_name, service, cast(low_pctl as real) as low_pctl, 
-        cast(mid_pctl as real) as mid_pctl, cast(top_pctl as real) as top_pctl
-    from 
-        experiments.hsc_risk_identifiers_new 
-    where
-        channel = 'city'
-    ) ct_srv_wt
-    on fin_wtge_tab.city = ct_srv_wt.city_name
-    and fin_wtge_tab.service = ct_srv_wt.service
 where 
     negative_count > 0 
 group by 
@@ -406,59 +410,32 @@ group by
 )
 
 select
-    *, 
+    as_of_date, service, city, service_detail_id, captain_id, net_orders, negative_count as negative_feedback_count, p0_negative_count as p0_negative_feedback_count,
+    p1_negative_count as p1_negative_feedback_count, p2_negative_count as p2_negative_feedback_count, rss_weightage, unsafe_bhv_cnt as unsafe_behaviour_count,
+    unsafe_rde_cnt as unsafe_ride_count, p0_escalations_count, p1_escalations_count, p2_escalations_count, 
     (case 
-        when total_weightage >= wt_pct_top then 'UHR'
-        when total_weightage >= wt_pct_mid then 'HR'
-        when total_weightage >= wt_pct_low then 'MR'
-        when (coverage_count is null or coverage_count = 0) then 'NC'
+        when rss_weightage >= wt_pct_top then 'UHR'
+        when rss_weightage >= wt_pct_mid then 'HR'
+        when rss_weightage >= wt_pct_low then 'MR'
+        when rss_weightage is null then 'NC'
     else 
         'LR'
     end) as safety_profile, 
     (case 
         when unsafe_bhv_cnt > 1 and unsafe_bhv_pctg >= 0.35 then 'Unsafe Behaviour'
         when unsafe_rde_cnt > 1 and unsafe_rde_pctg >= 0.35 then 'Unsafe Riding'
-        -- when net_orders > 5 and overspd_ords_pct >= 0.50 then '2. Unsafe Riding'
-        when (coalesce(unsafe_bhv_cnt, 0) + coalesce(unsafe_rde_cnt, 0)) > 1 and unsafe_pctg >= 0.35 then 'Unsafe Behaviour'
-        -- when (coalesce(unsafe_bhv_cnt, 0) + coalesce(unsafe_rde_cnt, 0)) > 1 and unsafe_pctg >= 0.25 
-        -- and net_orders > 4 and overspd_ords_pct >= 0.40 then 'Unsafe Behaviour'
     else 
-        null
+        'None'
     end) as safety_proximity
 from 
-(
--- -- select
--- -- risk_profile, count(distinct captain_id) as caps 
--- -- from (
--- select
---     *, 
-
-    
---     (case 
---         when risk_profile = '1. No Coverage' then '1. NC'
---         when (risk_profile = '2. Only +VE HSC' or risk_profile = '3. Low Risk Captains') then '2. LR'
---         when risk_profile = '4. Mid Risk Captains' then '3. MR'
---         when risk_profile = '5. High Risk Captains' then '4. HR'
---         when risk_profile = '5. Ultra High Risk Captains' then '5. UHR'
---     else 
---         'Check'
---     end) as safety_profile 
-
--- from 
---     (
+    (
     select
-        date_format(date('2023-06-18'),'%Y-%m-%d') as as_of_date, 
-        m_net_c.*, 
-        coverage_count, negative_count, 
+        date_format(date('2023-07-23'),'%Y-%m-%d') as as_of_date, m_net_c.*, negative_count, 
+        
         p0_negative_count, 
         (case when negative_count >= 1 then cast(p0_negative_count as double)/negative_count end) as p0_negative_pctg,
         
-        -- esc_p0_negative_count, 
-        p1_negative_count, 
-        -- esc_p1_negative_count, 
-        p2_negative_count, 
-        -- esc_p2_negative_count,
-        total_weightage, wt_pct_low, wt_pct_mid, wt_pct_top,
+        p1_negative_count, p2_negative_count, total_weightage as rss_weightage, wt_pct_low, wt_pct_mid, wt_pct_top,
         
         unsafe_bhv_cnt, 
         (case when negative_count >= 1 then cast(unsafe_bhv_cnt as double)/negative_count end) as unsafe_bhv_pctg,
@@ -466,29 +443,27 @@ from
         unsafe_rde_cnt,
         (case when negative_count >= 1 then cast(unsafe_rde_cnt as double)/negative_count end) as unsafe_rde_pctg,
         
-        (case when negative_count >= 1 then cast((coalesce(unsafe_bhv_cnt, 0) + coalesce(unsafe_rde_cnt, 0)) as double)/negative_count end) as unsafe_pctg, 
-        
         p0_escalations_count, p1_escalations_count, p2_escalations_count
         
-        -- ,cast(overspd_ords as double)/net_orders as overspd_ords_pct
     from 
         (
         select
-            service, city, captain_id, count(distinct order_id) as net_orders
-            -- ,count(distinct case when maxSpeed >= 60 then order_id end) as overspd_ords
+            service, city, service_detail_id, captain_id, count(distinct order_id) as net_orders
         from
             orders_raw
         group by 
-            1, 2, 3
+            1, 2, 3, 4
         ) m_net_c 
+        
         left join 
         (
         select
             fin_wtge_tab.*, wt_pct_low, wt_pct_mid, wt_pct_top
         from 
-            fin_wtge_tab left join thshlds_wt
-        on 
-            fin_wtge_tab.service = thshlds_wt.service
+            fin_wtge_tab 
+            
+            left join thshlds_wt
+            on fin_wtge_tab.service = thshlds_wt.service
             and fin_wtge_tab.city = thshlds_wt.city
         ) cv_caps 
         on 
@@ -497,4 +472,4 @@ from
             and m_net_c.captain_id = cv_caps.captain_id
             
 
-)
+    )
