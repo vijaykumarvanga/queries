@@ -410,7 +410,9 @@ group by
 )
 
 select
-    *, 
+    as_of_date, service, city, service_detail_id, captain_id, net_orders, negative_count as negative_feedback_count, p0_negative_count as p0_negative_feedback_count,
+    p1_negative_count as p1_negative_feedback_count, p2_negative_count as p2_negative_feedback_count, rss_weightage, unsafe_bhv_cnt as unsafe_behaviour_count,
+    unsafe_rde_cnt as unsafe_ride_count, p0_escalations_count, p1_escalations_count, p2_escalations_count, 
     (case 
         when rss_weightage >= wt_pct_top then 'UHR'
         when rss_weightage >= wt_pct_mid then 'HR'
