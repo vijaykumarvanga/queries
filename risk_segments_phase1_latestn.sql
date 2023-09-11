@@ -104,7 +104,7 @@ from
     freshdesk.tickets_snapshot
 where 
     yyyymmdd >= date_format(date('2023-01-23') - interval '1' day,'%Y%m%d')       ---- start date (before 6 months)
-    and yyyymmdd <= date_format(date('2023-07-17'),'%Y%m%d')                      ---- Date is fixed, don't change this
+    and yyyymmdd <= date_format(date('2023-09-07'),'%Y%m%d')                      ---- Date is fixed, don't change this
     and custom_fields_cf_ticketing_disposition = 'Customer Support'
     and custom_fields_cf_sub_reason918254 is not null
     and custom_fields_cf_reason IN (select distinct feedback_identfier from experiments.hsc_risk_identifiers_new where channel = 'escalation_ticket')
@@ -197,12 +197,12 @@ from
                 from    
                     (
                     select
-                        booking_id as book_id, null as custom_fields_cf_calling_priority, 
+                        distinct booking_id as book_id, json_extract_scalar(data,'$.calling_priority') as custom_fields_cf_calling_priority, 
                         reason as custom_fields_cf_reason, sub_reason918254 as custom_fields_cf_sub_reason918254
                     from 
                         raw.kafka_domain_support_tickets_v2_immutable
                     where 
-                        yyyymmdd >= date_format(date('2023-07-18'),'%Y%m%d')       ---- Date is fixed, don't change this
+                        yyyymmdd >= date_format(date('2023-09-08'),'%Y%m%d')       ---- Date is fixed, don't change this
                         and yyyymmdd <= date_format(date('2023-07-23') + interval '10' day,'%Y%m%d')                      ---- end date (after 6 months)
                         and booking_id IN (select order_id from orders_raw) 
                         and sub_reason918254 is not null
