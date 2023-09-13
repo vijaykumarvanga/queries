@@ -197,7 +197,7 @@ from
                 from    
                     (
                     select
-                        distinct booking_id as book_id, json_extract_scalar(data,'$.calling_priority') as custom_fields_cf_calling_priority, 
+                        distinct booking_id as book_id, calling_priority as custom_fields_cf_calling_priority, 
                         reason as custom_fields_cf_reason, sub_reason918254 as custom_fields_cf_sub_reason918254
                     from 
                         raw.kafka_domain_support_tickets_v2_immutable
