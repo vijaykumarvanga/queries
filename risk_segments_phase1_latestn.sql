@@ -34,8 +34,8 @@ from
     from 
         orders.order_logs_snapshot
     where 
-        yyyymmdd >= date_format(date('2023-01-23'),'%Y%m%d')
-        and yyyymmdd <= date_format(date('2023-07-23'),'%Y%m%d')
+        yyyymmdd >= date_format(date('2023-03-27'),'%Y%m%d')
+        and yyyymmdd <= date_format(date('2023-09-24'),'%Y%m%d')
         and ((service_obj_service_name = 'Link' and service_obj_city_display_name IN ('Bangalore','Hyderabad','Chennai','Delhi','Jaipur','Kolkata')) 
         or (service_obj_service_name = 'Auto' and service_obj_city_display_name IN ('Bangalore','Hyderabad','Chennai','Delhi','Jaipur','Mumbai')))
         and order_status = 'dropped'
@@ -103,7 +103,7 @@ select
 from
     freshdesk.tickets_snapshot
 where 
-    yyyymmdd >= date_format(date('2023-01-23') - interval '1' day,'%Y%m%d')       ---- start date (before 6 months)
+    yyyymmdd >= date_format(date('2023-03-27') - interval '1' day,'%Y%m%d')       ---- start date (before 6 months)
     and yyyymmdd <= date_format(date('2023-09-07'),'%Y%m%d')                      ---- Date is fixed, don't change this
     and custom_fields_cf_ticketing_disposition = 'Customer Support'
     and custom_fields_cf_sub_reason918254 is not null
@@ -203,7 +203,7 @@ from
                         raw.kafka_domain_support_tickets_v2_immutable
                     where 
                         yyyymmdd >= date_format(date('2023-09-08'),'%Y%m%d')       ---- Date is fixed, don't change this
-                        and yyyymmdd <= date_format(date('2023-07-23') + interval '10' day,'%Y%m%d')                      ---- end date (after 6 months)
+                        and yyyymmdd <= date_format(date('2023-09-24') + interval '10' day,'%Y%m%d')                      ---- end date (after 6 months)
                         and booking_id IN (select order_id from orders_raw) 
                         and sub_reason918254 is not null
                         and not contains(cast(tags as array<varchar>), 'customer_live_support')
@@ -270,23 +270,23 @@ from
         count(case when priority = 'P2' then order_id end) as p2_negative_count
     from 
         (
-        (
         select
             distinct data_orderid, context as data_context_new
         from 
             (
             select
-                distinct data_orderid, lower(data_text) as data_text, data_feedback
-            from 
-                raw.kafka_quality_logs_immutable
-            where 
-                yyyymmdd >= '20230215'
-                and yyyymmdd <= date_format(date('2023-07-23') + interval '1' day,'%Y%m%d')
-                and data_orderid IN (select distinct order_id from orders_raw)
-                and data_screen NOT IN ('ratings','storeRatings')
-                and data_audience = 'customer'
-                and data_questionid != 'none'
-                and data_text != ''
+                distinct order_id as data_orderid, lower("text") as data_text, feedback as data_feedback
+            from
+                canonical.quality_logs_immutable
+            where
+                yyyymmdd >= date_format(date('2023-03-27'),'%Y%m%d')
+                and yyyymmdd <= date_format(date('2023-09-24') + interval '1' day,'%Y%m%d')
+                and order_id IN (select distinct order_id from orders_raw)
+                and screen NOT IN ('ratings','storeRatings')
+                and audience = 'customer'
+                and question_id != 'none'
+                and "text" != ''
+                and "text" != 'none'
             ) pr_qlogs11
             
             inner join 
@@ -294,31 +294,6 @@ from
             where channel = 'micro_feedback') mf_ph_11
             on pr_qlogs11.data_text like  ('%' || mf_ph_11.feedback_identfier|| '%')
             and pr_qlogs11.data_feedback =  mf_ph_11.feedback_extension
-        )
-        union 
-        (
-        select
-            distinct data_orderid, context as data_context_new
-        from
-            (
-            select
-                distinct order_id as data_orderid, lower("text") as data_text, feedback as data_feedback
-            from 
-                raw.mongodb_rapidoqaulity_qualitylogs_immutable
-            where 
-                yyyymmdd >= date_format(date('2023-01-23') - interval '1' day,'%Y%m%d')
-                and yyyymmdd <= '20230214'
-                and audience = 'customer'
-                and order_id IN (select distinct order_id from orders_raw)
-                and lower(cast(screen as varchar)) not like '%ratings%'
-            )  pr_qlogs22
-            
-            inner join 
-            (select distinct channel, feedback_identfier, feedback_extension, context from experiments.hsc_risk_identifiers_new
-            where channel = 'micro_feedback') mf_ph_22
-            on pr_qlogs22.data_text like  ('%' || mf_ph_22.feedback_identfier|| '%')
-            and pr_qlogs22.data_feedback =  mf_ph_22.feedback_extension
-        )
         ) q_l_tab1 
         
         inner join orders_raw
@@ -430,7 +405,7 @@ select
 from 
     (
     select
-        date_format(date('2023-07-23'),'%Y-%m-%d') as as_of_date, m_net_c.*, negative_count, 
+        date_format(date('2023-09-24'),'%Y-%m-%d') as as_of_date, m_net_c.*, negative_count, 
         
         p0_negative_count, 
         (case when negative_count >= 1 then cast(p0_negative_count as double)/negative_count end) as p0_negative_pctg,
